@@ -40,7 +40,7 @@ if __name__ == '__main__':
 
     img_scale = 0.5
     val_percent = 0.1
-    batch_size = 1
+    batch_size = 32
 
     try:
         dataset = CarvanaDataset(dir_img, dir_mask, img_scale)

@@ -75,7 +75,7 @@ def train_model(
 
     # 4. Set up the optimizer, the loss, the learning rate scheduler and the loss scaling for AMP
     optimizer = optim.RMSprop(model.parameters(),
-                              lr=learning_rate, weight_decay=weight_decay, momentum=momentum, foreach=True)
+                              lr=learning_rate, weight_decay=weight_decay, momentum=momentum) #, foreach=True)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)  # goal: maximize Dice score
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
     criterion = nn.CrossEntropyLoss() if model.n_classes > 1 else nn.BCEWithLogitsLoss()
@@ -208,30 +208,30 @@ if __name__ == '__main__':
         logging.info(f'Model loaded from {args.load}')
 
     model.to(device=device)
-    try:
-        train_model(
-            model=model,
-            epochs=args.epochs,
-            batch_size=args.batch_size,
-            learning_rate=args.lr,
-            device=device,
-            img_scale=args.scale,
-            val_percent=args.val / 100,
-            amp=args.amp
-        )
-    except torch.cuda.OutOfMemoryError:
-        logging.error('Detected OutOfMemoryError! '
-                      'Enabling checkpointing to reduce memory usage, but this slows down training. '
-                      'Consider enabling AMP (--amp) for fast and memory efficient training')
-        torch.cuda.empty_cache()
-        model.use_checkpointing()
-        train_model(
-            model=model,
-            epochs=args.epochs,
-            batch_size=args.batch_size,
-            learning_rate=args.lr,
-            device=device,
-            img_scale=args.scale,
-            val_percent=args.val / 100,
-            amp=args.amp
-        )
+    # try:
+    train_model(
+        model=model,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        learning_rate=args.lr,
+        device=device,
+        img_scale=args.scale,
+        val_percent=args.val / 100,
+        amp=args.amp
+    )
+    # except torch.cuda.OutOfMemoryError:
+    #     logging.error('Detected OutOfMemoryError! '
+    #                   'Enabling checkpointing to reduce memory usage, but this slows down training. '
+    #                   'Consider enabling AMP (--amp) for fast and memory efficient training')
+    #     torch.cuda.empty_cache()
+    #     model.use_checkpointing()
+    #     train_model(
+    #         model=model,
+    #         epochs=args.epochs,
+    #         batch_size=args.batch_size,
+    #         learning_rate=args.lr,
+    #         device=device,
+    #         img_scale=args.scale,
+    #         val_percent=args.val / 100,
+    #         amp=args.amp
+    #     )
