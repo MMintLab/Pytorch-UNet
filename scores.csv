@@ -1,0 +1,4 @@
+Dataset,Score
+Training,"tensor(0.8138, device='cuda:0')"
+Validation,"tensor(0.7959, device='cuda:0')"
+Test,"tensor(0.7766, device='cuda:0')"

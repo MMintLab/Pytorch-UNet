@@ -19,8 +19,12 @@ from unet import UNet
 from utils.data_loading import BasicDataset, CarvanaDataset
 from utils.dice_score import dice_loss
 
-dir_img = Path('./data/imgs/')
-dir_mask = Path('./data/masks/')
+dir_img = Path('./data_default/imgs/')
+dir_mask = Path('./data_default/masks/')
+dir_train_img = Path('./data/train/imgs/')
+dir_train_mask = Path('./data/train/masks/')
+dir_val_img = Path('./data/val/imgs/')
+dir_val_mask = Path('./data/val/masks/')
 dir_checkpoint = Path('./checkpoints/')
 
 
@@ -37,22 +41,39 @@ def train_model(
         weight_decay: float = 1e-8,
         momentum: float = 0.999,
         gradient_clipping: float = 1.0,
+        default: bool = False
 ):
-    # 1. Create dataset
-    try:
-        dataset = CarvanaDataset(dir_img, dir_mask, img_scale)
-    except (AssertionError, RuntimeError, IndexError):
-        dataset = BasicDataset(dir_img, dir_mask, img_scale)
+    if default:
+        print('Using default dataset')
+        try:
+            dataset = CarvanaDataset(dir_img, dir_mask, img_scale)
+        except (AssertionError, RuntimeError, IndexError):
+            dataset = BasicDataset(dir_img, dir_mask, img_scale)
 
-    # 2. Split into train / validation partitions
-    n_val = int(len(dataset) * val_percent)
-    n_train = len(dataset) - n_val
-    train_set, val_set = random_split(dataset, [n_train, n_val], generator=torch.Generator().manual_seed(0))
+        # # 2. Split into train / validation partitions
+        n_val = int(len(dataset) * val_percent)
+        n_train = len(dataset) - n_val
+        train_set, val_set = random_split(dataset, [n_train, n_val], generator=torch.Generator().manual_seed(0))
+            
+    else:
+        # 1. Create dataset
+        try:
+            train_set = CarvanaDataset(dir_train_img, dir_train_mask, img_scale)
+        except (AssertionError, RuntimeError, IndexError):
+            train_set = BasicDataset(dir_train_img, dir_train_mask, img_scale)
+
+        try:
+            val_set = CarvanaDataset(dir_val_img, dir_val_mask, img_scale)
+        except (AssertionError, RuntimeError, IndexError):
+            val_set = BasicDataset(dir_val_img, dir_val_mask, img_scale)
 
     # 3. Create data loaders
     loader_args = dict(batch_size=batch_size, num_workers=os.cpu_count(), pin_memory=True)
     train_loader = DataLoader(train_set, shuffle=True, **loader_args)
     val_loader = DataLoader(val_set, shuffle=False, drop_last=True, **loader_args)
+
+    n_train = len(train_set)
+    n_val = len(val_set)
 
     # (Initialize logging)
     experiment = wandb.init(project='U-Net', resume='allow', anonymous='must')
@@ -88,6 +109,7 @@ def train_model(
         with tqdm(total=n_train, desc=f'Epoch {epoch}/{epochs}', unit='img') as pbar:
             for batch in train_loader:
                 images, true_masks = batch['image'], batch['mask']
+                # import pdb; pdb.set_trace()
 
                 assert images.shape[1] == model.n_channels, \
                     f'Network has been defined with {model.n_channels} input channels, ' \
@@ -161,7 +183,11 @@ def train_model(
         if save_checkpoint:
             Path(dir_checkpoint).mkdir(parents=True, exist_ok=True)
             state_dict = model.state_dict()
-            state_dict['mask_values'] = dataset.mask_values
+            if default:
+                state_dict['mask_values'] = dataset.mask_values
+            else:
+                state_dict['mask_values'] = train_set.mask_values
+
             torch.save(state_dict, str(dir_checkpoint / 'checkpoint_epoch{}.pth'.format(epoch)))
             logging.info(f'Checkpoint {epoch} saved!')
 
@@ -179,6 +205,7 @@ def get_args():
     parser.add_argument('--amp', action='store_true', default=False, help='Use mixed precision')
     parser.add_argument('--bilinear', action='store_true', default=False, help='Use bilinear upsampling')
     parser.add_argument('--classes', '-c', type=int, default=2, help='Number of classes')
+    parser.add_argument('--default', action='store_true', default=False, help='Save checkpoints')
 
     return parser.parse_args()
 
@@ -187,13 +214,20 @@ if __name__ == '__main__':
     args = get_args()
 
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda:0')
     logging.info(f'Using device {device}')
 
+    # import pdb; pdb.set_trace()
+
     # Change here to adapt to your data
-    # n_channels=3 for RGB images
+    if args.default:
+        n_channels=3
+    else:
+        n_channels=1
+    
     # n_classes is the number of probabilities you want to get per pixel
-    model = UNet(n_channels=3, n_classes=args.classes, bilinear=args.bilinear)
+    model = UNet(n_channels=n_channels, n_classes=args.classes, bilinear=args.bilinear)
     model = model.to(memory_format=torch.channels_last)
 
     logging.info(f'Network:\n'
@@ -217,7 +251,8 @@ if __name__ == '__main__':
         device=device,
         img_scale=args.scale,
         val_percent=args.val / 100,
-        amp=args.amp
+        amp=args.amp,
+        default=args.default
     )
     # except torch.cuda.OutOfMemoryError:
     #     logging.error('Detected OutOfMemoryError! '

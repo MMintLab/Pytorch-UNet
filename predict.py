@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from PIL import Image
 from torchvision import transforms
 
-from utils.data_loading import BasicDataset
+from utils.data_loading import BasicDataset, load_image
 from unet import UNet
 from utils.utils import plot_img_and_mask
 
@@ -23,6 +23,7 @@ def predict_img(net,
     img = img.to(device=device, dtype=torch.float32)
 
     with torch.no_grad():
+        import pdb; pdb.set_trace()
         output = net(img).cpu()
         output = F.interpolate(output, (full_img.size[1], full_img.size[0]), mode='bilinear')
         if net.n_classes > 1:
@@ -60,6 +61,7 @@ def get_output_filenames(args):
 
 
 def mask_to_image(mask: np.ndarray, mask_values):
+    import pdb; pdb.set_trace()
     if isinstance(mask_values[0], list):
         out = np.zeros((mask.shape[-2], mask.shape[-1], len(mask_values[0])), dtype=np.uint8)
     elif mask_values == [0, 1]:
@@ -83,7 +85,7 @@ if __name__ == '__main__':
     in_files = args.input
     out_files = get_output_filenames(args)
 
-    net = UNet(n_channels=3, n_classes=args.classes, bilinear=args.bilinear)
+    net = UNet(n_channels=1, n_classes=args.classes, bilinear=args.bilinear)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logging.info(f'Loading model {args.model}')
@@ -98,7 +100,9 @@ if __name__ == '__main__':
 
     for i, filename in enumerate(in_files):
         logging.info(f'Predicting image {filename} ...')
-        img = Image.open(filename)
+        # img = Image.open(filename)
+
+        img = load_image(filename)
 
         mask = predict_img(net=net,
                            full_img=img,
@@ -109,6 +113,9 @@ if __name__ == '__main__':
         if not args.no_save:
             out_filename = out_files[i]
             result = mask_to_image(mask, mask_values)
+            converted_img = img.convert('L')
+            # import pdb; pdb.set_trace()
+            converted_img.save('input.jpg')
             result.save(out_filename)
             logging.info(f'Mask saved to {out_filename}')
 

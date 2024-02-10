@@ -18,7 +18,8 @@ def load_image(filename):
     if ext == '.npy':
         return Image.fromarray(np.load(filename))
     elif ext in ['.pt', '.pth']:
-        return Image.fromarray(torch.load(filename).numpy())
+        image = (torch.load(filename).squeeze(0).numpy()*255).astype(np.uint8)
+        return Image.fromarray(image)
     else:
         return Image.open(filename)
 
@@ -33,6 +34,8 @@ def unique_mask_values(idx, mask_dir, mask_suffix):
         return np.unique(mask, axis=0)
     else:
         raise ValueError(f'Loaded masks should have 2 or 3 dimensions, found {mask.ndim}')
+    
+
 
 
 class BasicDataset(Dataset):
@@ -44,6 +47,7 @@ class BasicDataset(Dataset):
         self.mask_suffix = mask_suffix
 
         self.ids = [splitext(file)[0] for file in listdir(images_dir) if isfile(join(images_dir, file)) and not file.startswith('.')]
+        # import pdb; pdb.set_trace()
         if not self.ids:
             raise RuntimeError(f'No input file found in {images_dir}, make sure you put your images there')
 
@@ -115,3 +119,9 @@ class BasicDataset(Dataset):
 class CarvanaDataset(BasicDataset):
     def __init__(self, images_dir, mask_dir, scale=1):
         super().__init__(images_dir, mask_dir, scale, mask_suffix='_mask')
+
+class ToolDataset(BasicDataset):
+    def __init__(self, images_dir, mask_dir, tool_name, scale=1):
+        super().__init__(images_dir, mask_dir, scale, mask_suffix='')
+        self.ids = [idx for idx in self.ids if tool_name in idx]
+
