@@ -10,23 +10,18 @@ import torchvision.transforms as transforms
 import torchvision.transforms.functional as TF
 from pathlib import Path
 from torch import optim
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, random_split, ConcatDataset
 from tqdm import tqdm
 
 import wandb
 from evaluate import evaluate
 from unet import UNet
-from utils.data_loading import BasicDataset, CarvanaDataset
+from utils.data_loading import BasicDataset, CarvanaDataset, ToolDataset, full_dataset
 from utils.dice_score import dice_loss
 
 dir_img = Path('./data_default/imgs/')
 dir_mask = Path('./data_default/masks/')
-dir_train_img = Path('./data/train/imgs/')
-dir_train_mask = Path('./data/train/masks/')
-dir_val_img = Path('./data/val/imgs/')
-dir_val_mask = Path('./data/val/masks/')
 dir_checkpoint = Path('./checkpoints/')
-
 
 def train_model(
         model,
@@ -45,6 +40,7 @@ def train_model(
 ):
     if default:
         print('Using default dataset')
+        dataset_name = 'default'
         try:
             dataset = CarvanaDataset(dir_img, dir_mask, img_scale)
         except (AssertionError, RuntimeError, IndexError):
@@ -57,15 +53,8 @@ def train_model(
             
     else:
         # 1. Create dataset
-        try:
-            train_set = CarvanaDataset(dir_train_img, dir_train_mask, img_scale)
-        except (AssertionError, RuntimeError, IndexError):
-            train_set = BasicDataset(dir_train_img, dir_train_mask, img_scale)
-
-        try:
-            val_set = CarvanaDataset(dir_val_img, dir_val_mask, img_scale)
-        except (AssertionError, RuntimeError, IndexError):
-            val_set = BasicDataset(dir_val_img, dir_val_mask, img_scale)
+        dataset_name = '1-tool'
+        train_set, val_set, _, _ = full_dataset(dataset_name)
 
     # 3. Create data loaders
     loader_args = dict(batch_size=batch_size, num_workers=os.cpu_count(), pin_memory=True)
@@ -76,7 +65,10 @@ def train_model(
     n_val = len(val_set)
 
     # (Initialize logging)
-    experiment = wandb.init(project='U-Net', resume='allow', anonymous='must')
+    str_learning_rate = "{:.10f}".format(float(learning_rate)).rstrip('0')
+    model_name = 'model_' + dataset_name + '_E' + str(epochs) + '_B' + str(batch_size) + '_LR' + str_learning_rate
+    print(model_name)
+    experiment = wandb.init(project='U-Net', name=model_name, id=model_name, resume='allow')
     experiment.config.update(
         dict(epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
              val_percent=val_percent, save_checkpoint=save_checkpoint, img_scale=img_scale, amp=amp)
@@ -186,10 +178,15 @@ def train_model(
             if default:
                 state_dict['mask_values'] = dataset.mask_values
             else:
-                state_dict['mask_values'] = train_set.mask_values
+                state_dict['mask_values'] = [0, 255]
 
             torch.save(state_dict, str(dir_checkpoint / 'checkpoint_epoch{}.pth'.format(epoch)))
             logging.info(f'Checkpoint {epoch} saved!')
+    
+    models_path = './models/'
+    if not os.path.exists(models_path):
+        os.makedirs(models_path)
+    torch.save(model.state_dict(), models_path + model_name + '.pth')
 
 
 def get_args():

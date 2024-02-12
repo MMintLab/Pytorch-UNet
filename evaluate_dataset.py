@@ -10,7 +10,7 @@ from torchvision import transforms
 from torchvision.utils import save_image, make_grid
 from pathlib import Path
 
-from utils.data_loading import BasicDataset, CarvanaDataset
+from utils.data_loading import BasicDataset, CarvanaDataset, ToolDataset, full_dataset
 from unet import UNet
 from utils.utils import plot_img_and_mask
 from torch.utils.data import DataLoader, random_split, Subset 
@@ -88,69 +88,64 @@ if __name__ == '__main__':
         train_set, val_set = random_split(dataset, [n_train, n_val], generator=torch.Generator().manual_seed(0))
         test_set = val_set
     else:
-        try:
-            train_set = CarvanaDataset(dir_train_img, dir_train_mask, img_scale)
-        except (AssertionError, RuntimeError, IndexError):
-            train_set = BasicDataset(dir_train_img, dir_train_mask, img_scale)
-
-        try:
-            val_set = CarvanaDataset(dir_val_img, dir_val_mask, img_scale)
-        except (AssertionError, RuntimeError, IndexError):
-            val_set = BasicDataset(dir_val_img, dir_val_mask, img_scale)
-        
-        try:
-            test_set = CarvanaDataset(dir_test_img, dir_test_mask, img_scale)
-        except (AssertionError, RuntimeError, IndexError):
-            test_set = BasicDataset(dir_test_img, dir_test_mask, img_scale)
-
-    train_set = train_set
-    val_set = val_set
-    test_set = test_set
+        dataset_name = '1-tool'
+        train_set, val_set, test_set, test_unseen_set = full_dataset(dataset_name)
 
     # 3. Create data loaders
     loader_args = dict(batch_size=batch_size, num_workers=os.cpu_count(), pin_memory=True)
-    train_loader = DataLoader(train_set, shuffle=False, **loader_args)
-    val_loader = DataLoader(val_set, shuffle=False, drop_last=True, **loader_args)
-    test_loader = DataLoader(test_set, shuffle=False, drop_last=True, **loader_args)
+    train_loader = DataLoader(train_set, shuffle=False)
+    val_loader = DataLoader(val_set, shuffle=False)
+    test_loader = DataLoader(test_set, shuffle=False)
+    test_unseen_set_loader = DataLoader(test_unseen_set, shuffle=False)
 
     train_score = evaluate(net, train_loader, device, args.amp)
     val_score = evaluate(net, val_loader, device, args.amp)
     test_score = evaluate(net, test_loader, device, args.amp)
+    test_unseen_score = evaluate(net, test_unseen_set_loader, device, args.amp)
 
     print(f'Training Dice score: {train_score:.4f}')
     print(f'Validation Dice score: {val_score:.4f}')
     print(f'Test Dice score: {test_score:.4f}')
+    print(f'Test Unseen Dice score: {test_unseen_score:.4f}')
 
     # Save scores in a CSV file
     scores = [
         ['Dataset', 'Score'],
         ['Training', train_score.item()],
         ['Validation', val_score.item()],
-        ['Test', test_score.item()]
+        ['Test', test_score.item()],
+        ['Test Unseen', test_unseen_score.item()]
     ]
 
-    train_path = Path('./results/train/')
-    val_path = Path('./results/val/')
-    test_path = Path('./results/test/')
+    model_results_path = os.path.join('./results',os.path.basename(args.model).replace('.pth','')) 
+    # import pdb; pdb.set_trace()
+
+    if not os.path.exists(model_results_path):
+        os.makedirs(model_results_path)
+    
+    train_path = Path(os.path.join(model_results_path, 'train'))
+    val_path = Path(os.path.join(model_results_path, 'val'))
+    test_path = Path(os.path.join(model_results_path, 'test'))
+    test_unseen_path = Path(os.path.join(model_results_path, 'test_unseen'))
+
     if not train_path.exists():
         train_path.mkdir(parents=True)
     if not val_path.exists():
         val_path.mkdir(parents=True)
     if not test_path.exists():
         test_path.mkdir(parents=True)
+    if not test_unseen_path.exists():
+        test_unseen_path.mkdir(parents=True)
 
-    scores_path = Path('./results/scores.csv')
-    # if not scores_path.exists():
-    #     scores_path.mkdir(parents=True)
-
+    scores_path = os.path.join(model_results_path, 'scores.csv')
     with open(scores_path, 'w', newline='') as file:
         writer = csv.writer(file)
         writer.writerows(scores)
-
     print('Scores saved in scores.csv')
 
     # 4. Qualitative evaluation
     qualitative_results(train_set, train_path, net, device)
     qualitative_results(val_set, val_path, net, device)
     qualitative_results(test_set, test_path, net, device)
+    qualitative_results(test_unseen_set, test_unseen_path, net, device)
     print('Qualitative results saved in ./results/')

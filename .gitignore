@@ -1,6 +1,7 @@
 *.pyc
 data/
 data_default/
+results/
 __pycache__/
 checkpoints/
 *.pth
