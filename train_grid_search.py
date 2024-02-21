@@ -18,6 +18,7 @@ from evaluate import evaluate
 from unet import UNet
 from utils.data_loading import BasicDataset, CarvanaDataset, ToolDataset, full_dataset
 from utils.dice_score import dice_loss
+import itertools
 
 dir_img = Path('./data_default/imgs/')
 dir_mask = Path('./data_default/masks/')
@@ -25,6 +26,10 @@ dir_checkpoint = Path('./checkpoints/')
 
 def train_model(
         model,
+        train_set,
+        val_set,
+        test_set,
+        test_unseen_set,
         device,
         epochs: int = 5,
         batch_size: int = 1,
@@ -38,40 +43,25 @@ def train_model(
         gradient_clipping: float = 1.0,
         default: bool = False
 ):
-    if default:
-        print('Using default dataset')
-        dataset_name = 'default'
-        try:
-            dataset = CarvanaDataset(dir_img, dir_mask, img_scale)
-        except (AssertionError, RuntimeError, IndexError):
-            dataset = BasicDataset(dir_img, dir_mask, img_scale)
-
-        # # 2. Split into train / validation partitions
-        n_val = int(len(dataset) * val_percent)
-        n_train = len(dataset) - n_val
-        train_set, val_set = random_split(dataset, [n_train, n_val], generator=torch.Generator().manual_seed(0))
-            
-    else:
-        # 1. Create dataset
-        dataset_name = args.dataset_name
-        train_set, val_set, _, _, _ = full_dataset(dataset_name, device = device)
 
     # 3. Create data loaders
     loader_args = dict(batch_size=batch_size) #, num_workers=os.cpu_count() , pin_memory=True
     train_loader = DataLoader(train_set, shuffle=True, **loader_args)
     val_loader = DataLoader(val_set, shuffle=False, drop_last=True, **loader_args)
+    test_loader = DataLoader(test_set, shuffle=False, drop_last=True, **loader_args)
+    test_unseen_set_loader = DataLoader(test_unseen_set, shuffle=False, drop_last=True, **loader_args)
 
     n_train = len(train_set)
     n_val = len(val_set)
 
     # (Initialize logging)
     str_learning_rate = "{:.10f}".format(float(learning_rate)).rstrip('0')
-    model_name = 'model_' + dataset_name + '_E' + str(epochs) + '_B' + str(batch_size) + '_LR' + str_learning_rate
+    model_name = 'model_0_' + dataset_name + '_E' + str(epochs) + '_B' + str(batch_size) + '_LR' + str_learning_rate
     print(model_name)
     experiment = wandb.init(project='U-Net', name=model_name, id=model_name, resume='allow')
     experiment.config.update(
         dict(epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
-             val_percent=val_percent, save_checkpoint=save_checkpoint, img_scale=img_scale, amp=amp)
+             val_percent=val_percent, save_checkpoint=save_checkpoint, img_scale=img_scale)
     )
 
     logging.info(f'''Starting training:
@@ -161,14 +151,20 @@ def train_model(
                             if not (torch.isinf(value.grad) | torch.isnan(value.grad)).any():
                                 histograms['Gradients/' + tag] = wandb.Histogram(value.grad.data.cpu())
 
-                        val_score = evaluate(model, val_loader, device, amp)
+                        train_score, train_loss = evaluate(model, train_loader, device, amp)
+                        val_score, val_loss = evaluate(model, val_loader, device, amp)
+                        test_score, test_loss = evaluate(model, test_loader, device, amp)
+                        test_unseen_score, test_unseen_loss = evaluate(model, test_unseen_set_loader, device, amp)
                         scheduler.step(val_score)
 
                         logging.info('Validation Dice score: {}'.format(val_score))
                         try:
                             experiment.log({
                                 'learning rate': optimizer.param_groups[0]['lr'],
+                                'train Dice': train_score,
                                 'validation Dice': val_score,
+                                'test Dice': test_score,
+                                'test unseen Dice': test_unseen_score,
                                 'images': wandb.Image(images[0].cpu()),
                                 'masks': {
                                     'true': wandb.Image(true_masks[0].float().cpu()),
@@ -176,27 +172,34 @@ def train_model(
                                 },
                                 'step': global_step,
                                 'epoch': epoch,
+                                'train loss_2': train_loss,
+                                'validation loss': val_loss,
+                                'test loss': test_loss,
+                                'test unseen loss': test_unseen_loss,
                                 **histograms
                             })
                         except:
                             pass
 
-        if save_checkpoint:
-            Path(dir_checkpoint).mkdir(parents=True, exist_ok=True)
-            state_dict = model.state_dict()
-            if default:
-                state_dict['mask_values'] = dataset.mask_values
-            else:
-                state_dict['mask_values'] = [0, 255]
+        # if save_checkpoint:
+        #     Path(dir_checkpoint).mkdir(parents=True, exist_ok=True)
+        #     state_dict = model.state_dict()
+        #     if default:
+        #         state_dict['mask_values'] = dataset.mask_values
+        #     else:
+        #         state_dict['mask_values'] = [0, 255]
 
-            torch.save(state_dict, str(dir_checkpoint / 'checkpoint_epoch{}.pth'.format(epoch)))
-            logging.info(f'Checkpoint {epoch} saved!')
+        #     torch.save(state_dict, str(dir_checkpoint / 'checkpoint_epoch{}.pth'.format(epoch)))
+        #     logging.info(f'Checkpoint {epoch} saved!')
     
-    models_path = './models/'
-    if not os.path.exists(models_path):
-        os.makedirs(models_path)
-    torch.save(model.state_dict(), models_path + model_name + '.pth')
+        models_path = './models/'
+        if epoch in [5, 10, 20, 30]:
+            model_name = 'model_' + dataset_name + '_E' + str(epoch) + '_B' + str(batch_size) + '_LR' + str_learning_rate
+            if not os.path.exists(models_path):
+                os.makedirs(models_path)
+            torch.save(model.state_dict(), models_path + model_name + '.pth')
 
+    experiment.finish()
 
 def get_args():
     parser = argparse.ArgumentParser(description='Train the UNet on images and target masks')
@@ -213,6 +216,7 @@ def get_args():
     parser.add_argument('--classes', '-c', type=int, default=2, help='Number of classes')
     parser.add_argument('--default', action='store_true', default=False, help='Save checkpoints')
     parser.add_argument('--dataset_name', type=str, default='1-tool', help='Name of the dataset')
+    parser.add_argument('--device', type=str, default='cuda:0', help='Name of the device')
 
     return parser.parse_args()
 
@@ -234,6 +238,10 @@ if __name__ == '__main__':
         device = torch.device('cuda:2')
         
     logging.info(f'Using device {device}')
+
+    if args.device:
+        device = torch.device(args.device)
+        logging.info(f'Using device {device}')
     # import pdb; pdb.set_trace()
 
     # import pdb; pdb.set_trace()
@@ -244,48 +252,59 @@ if __name__ == '__main__':
     else:
         n_channels=1
     
-    # n_classes is the number of probabilities you want to get per pixel
-    model = UNet(n_channels=n_channels, n_classes=args.classes, bilinear=args.bilinear)
-    model = model.to(memory_format=torch.channels_last)
-
-    logging.info(f'Network:\n'
-                 f'\t{model.n_channels} input channels\n'
-                 f'\t{model.n_classes} output channels (classes)\n'
-                 f'\t{"Bilinear" if model.bilinear else "Transposed conv"} upscaling')
-
-    if args.load:
-        state_dict = torch.load(args.load, map_location=device)
-        del state_dict['mask_values']
-        model.load_state_dict(state_dict)
-        logging.info(f'Model loaded from {args.load}')
-
-    model.to(device=device)
     # try:
     # import pdb; pdb.set_trace()
-    train_model(
-        model=model,
-        epochs=args.epochs,
-        batch_size=args.batch_size,
-        learning_rate=args.lr,
-        device=device,
-        img_scale=args.scale,
-        val_percent=args.val / 100,
-        amp=args.amp,
-        default=args.default
-    )
-    # except torch.cuda.OutOfMemoryError:
-    #     logging.error('Detected OutOfMemoryError! '
-    #                   'Enabling checkpointing to reduce memory usage, but this slows down training. '
-    #                   'Consider enabling AMP (--amp) for fast and memory efficient training')
-    #     torch.cuda.empty_cache()
-    #     model.use_checkpointing()
-    #     train_model(
-    #         model=model,
-    #         epochs=args.epochs,
-    #         batch_size=args.batch_size,
-    #         learning_rate=args.lr,
-    #         device=device,
-    #         img_scale=args.scale,
-    #         val_percent=args.val / 100,
-    #         amp=args.amp
-    #     )
+    if args.default:
+        print('Using default dataset')
+        dataset_name = 'default'
+        try:
+            dataset = CarvanaDataset(dir_img, dir_mask, args.img_scale)
+        except (AssertionError, RuntimeError, IndexError):
+            dataset = BasicDataset(dir_img, dir_mask, args.img_scale)
+
+        # # 2. Split into train / validation partitions
+        n_val = int(len(dataset) * args.val_percent)
+        n_train = len(dataset) - n_val
+        train_set, val_set = random_split(dataset, [n_train, n_val], generator=torch.Generator().manual_seed(0))
+            
+    else:
+        # 1. Create dataset
+        dataset_name = args.dataset_name
+        train_set, val_set, test_set, test_unseen_set, _ = full_dataset(dataset_name, device = device)
+
+    # Define your hyperparameters
+    hyperparameters = {
+        'learning_rate': [0.00001, 0.0001, 0.001, 0.01],
+        'batch_size': [args.batch_size],
+        'epochs': [30],
+    }
+
+    # Iterate over all combinations of hyperparameters
+    for params in itertools.product(*hyperparameters.values()):
+        # Unpack the hyperparameters
+        learning_rate, batch_size, epochs = params
+
+        # Reset the model for each combination of hyperparameters
+        model = UNet(n_channels=n_channels, n_classes=args.classes, bilinear=args.bilinear)
+        model = model.to(memory_format=torch.channels_last)
+        model.to(device=device)
+
+        # Train the model with the current hyperparameters
+        train_model(
+            model=model,
+            train_set=train_set,
+            val_set=val_set,
+            test_set=test_set,
+            test_unseen_set=test_unseen_set,
+            device=device,
+            epochs=epochs,
+            batch_size=batch_size,
+            learning_rate=learning_rate,
+            amp=args.amp,
+        )
+
+    # Evaluate the model and save the results
+    # ...
+
+    # Update the best hyperparameters based on the evaluation results
+    # ...

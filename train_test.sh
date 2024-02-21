@@ -3,7 +3,7 @@
 learning_rates=(0.00001 0.0001 0.001 0.01 0.1)
 batch_sizes=(1 8 16 32 64)
 epochs=(5 10 20 30)
-dataset_name="1-tool"
+dataset_name="$1" # 'train-tools' 'train-test-tools' '1-tool'
 
 for lr in "${learning_rates[@]}"; do
     for bs in "${batch_sizes[@]}"; do
@@ -19,10 +19,10 @@ for lr in "${learning_rates[@]}"; do
             fi
             
             echo "Training with learning rate: $lr, batch size: $bs, and epochs: $ep"
-            python train.py --amp --batch-size $bs --epochs $ep --learning-rate $lr
+            python train.py --amp --batch-size $bs --epochs $ep --learning-rate $lr --dataset_name $dataset_name
 
             echo "Testing with learning rate: $lr, batch size: $bs, and epochs: $ep"
-            python evaluate_dataset.py --model "./models/$model_name"
+            python evaluate_dataset.py --model "./models/$model_name" --dataset_name $dataset_name
 
             echo "----------------------------------------"
         done
