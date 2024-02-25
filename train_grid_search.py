@@ -31,6 +31,7 @@ def train_model(
         test_set,
         test_unseen_set,
         device,
+        masking_method: str = 'sdf',
         epochs: int = 5,
         batch_size: int = 1,
         learning_rate: float = 1e-5,
@@ -56,7 +57,7 @@ def train_model(
 
     # (Initialize logging)
     str_learning_rate = "{:.10f}".format(float(learning_rate)).rstrip('0')
-    model_name = 'model_0_' + dataset_name + '_E' + str(epochs) + '_B' + str(batch_size) + '_LR' + str_learning_rate
+    model_name = 'masking_' + masking_method + '_model_' + dataset_name + '_E' + str(epochs) + '_B' + str(batch_size) + '_LR' + str_learning_rate
     print(model_name)
     experiment = wandb.init(project='U-Net', name=model_name, id=model_name, resume='allow')
     experiment.config.update(
@@ -194,7 +195,7 @@ def train_model(
     
         models_path = './models/'
         if epoch in [5, 10, 20, 30]:
-            model_name = 'model_' + dataset_name + '_E' + str(epoch) + '_B' + str(batch_size) + '_LR' + str_learning_rate
+            model_name = 'masking_' + masking_method + '_model_' + dataset_name + '_E' + str(epoch) + '_B' + str(batch_size) + '_LR' + str_learning_rate
             if not os.path.exists(models_path):
                 os.makedirs(models_path)
             torch.save(model.state_dict(), models_path + model_name + '.pth')
@@ -216,6 +217,7 @@ def get_args():
     parser.add_argument('--classes', '-c', type=int, default=2, help='Number of classes')
     parser.add_argument('--default', action='store_true', default=False, help='Save checkpoints')
     parser.add_argument('--dataset_name', type=str, default='1-tool', help='Name of the dataset')
+    parser.add_argument('--masking_method', type=str, default='sdf', help='Masking method')
     parser.add_argument('--device', type=str, default='cuda:0', help='Name of the device')
 
     return parser.parse_args()
@@ -270,7 +272,7 @@ if __name__ == '__main__':
     else:
         # 1. Create dataset
         dataset_name = args.dataset_name
-        train_set, val_set, test_set, test_unseen_set, _ = full_dataset(dataset_name, device = device)
+        train_set, val_set, test_set, test_unseen_set, _ = full_dataset(dataset_name, args.masking_method, device = device)
 
     # Define your hyperparameters
     hyperparameters = {
@@ -297,6 +299,7 @@ if __name__ == '__main__':
             test_set=test_set,
             test_unseen_set=test_unseen_set,
             device=device,
+            masking_method=args.masking_method,
             epochs=epochs,
             batch_size=batch_size,
             learning_rate=learning_rate,

@@ -12,12 +12,12 @@ from pathlib import Path
 from torch.utils.data import Dataset, ConcatDataset, Subset
 from tqdm import tqdm
 
-dir_train_img = Path('/data/datasets/unet_data/data/train/imgs/')
-dir_train_mask = Path('/data/datasets/unet_data/data/train/masks/')
-dir_val_img = Path('/data/datasets/unet_data/data/val/imgs/')
-dir_val_mask = Path('/data/datasets/unet_data/data/val/masks/')
-dir_test_img = Path('/data/datasets/unet_data/data/test/imgs/')
-dir_test_mask = Path('/data/datasets/unet_data/data/test/masks/')
+# dir_train_img = Path('/data/datasets/unet_data/data/train/imgs/')
+# dir_train_mask = Path('/data/datasets/unet_data/data/train/masks/')
+# dir_val_img = Path('/data/datasets/unet_data/data/val/imgs/')
+# dir_val_mask = Path('/data/datasets/unet_data/data/val/masks/')
+# dir_test_img = Path('/data/datasets/unet_data/data/test/imgs/')
+# dir_test_mask = Path('/data/datasets/unet_data/data/test/masks/')
 
 def load_image(filename):
     ext = splitext(filename)[1]
@@ -108,7 +108,25 @@ def datasets_definiton(name):
     
     return train_tools, test_tools
 
-def full_dataset(dataset_name, device='cpu'):
+def get_full_dataset_paths(masking_method):
+    if masking_method == 'sdf':
+        dir_train_img = Path('/data/datasets/unet_data/data_sdf/train/imgs/')
+        dir_train_mask = Path('/data/datasets/unet_data/data_sdf/train/masks/')
+        dir_val_img = Path('/data/datasets/unet_data/data_sdf/val/imgs/')
+        dir_val_mask = Path('/data/datasets/unet_data/data_sdf/val/masks/')
+        dir_test_img = Path('/data/datasets/unet_data/data_sdf/test/imgs/')
+        dir_test_mask = Path('/data/datasets/unet_data/data_sdf/test/masks/')
+    else:
+        dir_train_img = Path('/data/datasets/unet_data/data/train/imgs/')
+        dir_train_mask = Path('/data/datasets/unet_data/data/train/masks/')
+        dir_val_img = Path('/data/datasets/unet_data/data/val/imgs/')
+        dir_val_mask = Path('/data/datasets/unet_data/data/val/masks/')
+        dir_test_img = Path('/data/datasets/unet_data/data/test/imgs/')
+        dir_test_mask = Path('/data/datasets/unet_data/data/test/masks/')
+    return dir_train_img, dir_train_mask, dir_val_img, dir_val_mask, dir_test_img, dir_test_mask
+
+def full_dataset(dataset_name, masking_method, device='cpu'):
+    dir_train_img, dir_train_mask, dir_val_img, dir_val_mask, dir_test_img, dir_test_mask = get_full_dataset_paths(masking_method)
     train_tools, test_tools = datasets_definiton(dataset_name)
     train_datasets = [ToolDataset(dir_train_img, dir_train_mask, tool_name, device=device) for tool_name in train_tools]
     val_datasets = [ToolDataset(dir_val_img, dir_val_mask, tool_name, device=device) for tool_name in train_tools]

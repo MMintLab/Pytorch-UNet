@@ -10,13 +10,15 @@ from torchvision import transforms
 from torchvision.utils import save_image, make_grid
 from pathlib import Path
 
-from utils.data_loading import BasicDataset, CarvanaDataset, ToolDataset, full_dataset
+from utils.data_loading import BasicDataset, CarvanaDataset, ToolDataset, full_dataset, datasets_definiton
 from unet import UNet
 from utils.utils import plot_img_and_mask
 from torch.utils.data import DataLoader, random_split, Subset 
 from evaluate import evaluate
 import csv
 import time
+import matplotlib.pyplot as plt
+import torch 
 
 dir_img = Path('./data/imgs/')
 dir_mask = Path('./data/masks/')
@@ -60,6 +62,7 @@ def get_args():
     parser.add_argument('--classes', '-c', type=int, default=2, help='Number of classes')
     parser.add_argument('--default', action='store_true', default=False, help='Save checkpoints')
     parser.add_argument('--dataset_name', type=str, default='1-tool', help='Name of the dataset')
+    parser.add_argument('--masking_method', type=str, default='sdf', help='Method to create masks')
     return parser.parse_args()
 
 if __name__ == '__main__':
@@ -93,7 +96,7 @@ if __name__ == '__main__':
         dataset_name = args.dataset_name
 
         start_time = time.time()
-        train_set, val_set, test_set, test_unseen_set, vis_set = full_dataset(dataset_name, device=device)
+        train_set, val_set, test_set, test_unseen_set, vis_set = full_dataset(dataset_name, args.masking_method, device=device)
         end_time = time.time()
         execution_time = end_time - start_time
         print(f"Execution time: {execution_time} seconds")
@@ -126,7 +129,46 @@ if __name__ == '__main__':
         ['Test Unseen', test_unseen_score.item()]
     ]
 
+    train_tools, test_tools = datasets_definiton(args.dataset_name)
+    scores_per_tool = []
+
     model_results_path = os.path.join('./results',os.path.basename(args.model).replace('.pth','')) 
+    test_len = len(test_set)//len(train_tools)
+    for i, tool in enumerate(train_tools):
+        tool_set = Subset(test_set, range(i*test_len, (i+1)*test_len))
+        tool_loader = DataLoader(tool_set, shuffle=False)
+        tool_score, _ = evaluate(net, tool_loader, device, args.amp)
+        scores_per_tool.append([i+1, tool_score.item()])
+
+    scores_per_tool_file = os.path.join(model_results_path, 'test', 'scores_per_tools.pt')
+    torch.save(scores_per_tool, scores_per_tool_file)
+    plt.figure()
+    plt.bar(*zip(*scores_per_tool))
+    plt.title('Test scores per tool')
+    plt.xlabel('Tool')
+    plt.ylabel('Dice Score')
+    plt.xticks(range(1, len(train_tools) + 1))
+    plt.savefig(os.path.join(model_results_path, 'test', 'test_scores_per_tool.png'))
+
+    scores_per_tool = []
+    test_unseen_len = len(test_unseen_set)//len(test_tools)
+    for i, tool in enumerate(test_tools):
+        tool_set = Subset(test_unseen_set, range(i*test_unseen_len, (i+1)*test_unseen_len))
+        tool_loader = DataLoader(tool_set, shuffle=False)
+        tool_score, _ = evaluate(net, tool_loader, device, args.amp)
+        scores_per_tool.append([i+1, tool_score.item()])
+
+    scores_per_tool_file = os.path.join(model_results_path, 'test_unseen', 'scores_per_tools.pt')
+    torch.save(scores_per_tool, scores_per_tool_file)
+    plt.figure()
+    plt.bar(*zip(*scores_per_tool))
+    plt.title('Test Unseen scores per tool')
+    plt.xlabel('Tool')
+    plt.ylabel('Dice Score')
+    plt.xticks(range(1, len(test_tools) + 1))
+    plt.savefig(os.path.join(model_results_path, 'test_unseen', 'test_unseen_scores_per_tool.png'))
+
+   
     # import pdb; pdb.set_trace()
 
     if not os.path.exists(model_results_path):

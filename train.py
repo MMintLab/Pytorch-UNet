@@ -26,6 +26,8 @@ dir_checkpoint = Path('./checkpoints/')
 def train_model(
         model,
         device,
+        dataset_name = 'default',
+        masking_method = '',
         epochs: int = 5,
         batch_size: int = 1,
         learning_rate: float = 1e-5,
@@ -53,8 +55,8 @@ def train_model(
             
     else:
         # 1. Create dataset
-        dataset_name = args.dataset_name
-        train_set, val_set, _, _, _ = full_dataset(dataset_name, device = device)
+        dataset_name = dataset_name
+        train_set, val_set, _, _, _ = full_dataset(dataset_name, masking_method, device = device)
 
     # 3. Create data loaders
     loader_args = dict(batch_size=batch_size) #, num_workers=os.cpu_count() , pin_memory=True
@@ -66,7 +68,7 @@ def train_model(
 
     # (Initialize logging)
     str_learning_rate = "{:.10f}".format(float(learning_rate)).rstrip('0')
-    model_name = 'model_' + dataset_name + '_E' + str(epochs) + '_B' + str(batch_size) + '_LR' + str_learning_rate
+    model_name ='masking_' + masking_method + '_model_' + dataset_name + '_E' + str(epochs) + '_B' + str(batch_size) + '_LR' + str_learning_rate
     print(model_name)
     experiment = wandb.init(project='U-Net', name=model_name, id=model_name, resume='allow')
     experiment.config.update(
@@ -161,7 +163,7 @@ def train_model(
                             if not (torch.isinf(value.grad) | torch.isnan(value.grad)).any():
                                 histograms['Gradients/' + tag] = wandb.Histogram(value.grad.data.cpu())
 
-                        val_score = evaluate(model, val_loader, device, amp)
+                        val_score, _ = evaluate(model, val_loader, device, amp)
                         scheduler.step(val_score)
 
                         logging.info('Validation Dice score: {}'.format(val_score))
@@ -213,6 +215,7 @@ def get_args():
     parser.add_argument('--classes', '-c', type=int, default=2, help='Number of classes')
     parser.add_argument('--default', action='store_true', default=False, help='Save checkpoints')
     parser.add_argument('--dataset_name', type=str, default='1-tool', help='Name of the dataset')
+    parser.add_argument('--masking_method', type=str, default='sdf', help='Masking method')
 
     return parser.parse_args()
 
@@ -234,9 +237,6 @@ if __name__ == '__main__':
         device = torch.device('cuda:2')
         
     logging.info(f'Using device {device}')
-    # import pdb; pdb.set_trace()
-
-    # import pdb; pdb.set_trace()
 
     # Change here to adapt to your data
     if args.default:
@@ -265,6 +265,8 @@ if __name__ == '__main__':
     train_model(
         model=model,
         epochs=args.epochs,
+        dataset_name=args.dataset_name,
+        masking_method=args.masking_method,
         batch_size=args.batch_size,
         learning_rate=args.lr,
         device=device,
